@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-import csv
-import gzip
-import datetime
-import httplib2
 from cStringIO import StringIO
+import csv
+import datetime
+import ftplib
+import gzip
+import httplib2
+import urllib2
 
 
 
@@ -17,17 +19,28 @@ class StationLoader(object):
     def __init__(self, http_cache=None):
         self.cache = http_cache or '.cache'
 
-    def get_stations(self, url=None):
+    def get_stations(self, url=None, ftp=None, csv_file=None):
         """
         Return the list of weather stations. One by one
         """
-        h = httplib2.Http(self.cache)
-        # ETag implementation on the server-side is broken
-        h.ignore_etag = True
-        resp, content = h.request(url or self.STATIONS_URL)
-        if resp.status != 200:
-            raise RuntimeError('Stations at {0} not found'.format(url or self.STATIONS_URL))
-        reader = csv.reader(StringIO(content))
+        url = url or self.STATIONS_URL
+        if ftp:
+            resp = urllib2.urlopen(url)
+            data = StringIO(resp.read())
+        elif csv_file:
+            with open(csv_file) as f:
+                data = StringIO(f.read())
+        else:
+            h = httplib2.Http(self.cache)
+            # ETag implementation on the server-side is broken
+            h.ignore_etag = True
+            resp, content = h.request(url or self.STATIONS_URL)
+            if resp.status != 200:
+                error = 'Stations at {0} not found'.format(
+                    url or self.STATIONS_URL)
+                raise RuntimeError(error)
+            data = StringIO(content)
+        reader = csv.reader(data)
         header = reader.next()
         field_names = self.get_field_names(header)
         for fields in reader:
@@ -51,10 +64,11 @@ class StationLoader(object):
         Postprocess dict with station info
         """
         # latitude and longitude
-        obj['lat'] = obj['lat'] and obj['lat'] != '-99999' and int(obj['lat']) / 1000.0 or None
-        obj['lon'] = obj['lon'] and obj['lon'] != '-999999' and int(obj['lon']) / 1000.0 or None
+        obj['lat'] = float(obj['lat'].replace("+", "")) if obj['lat'] else None
+        obj['lon'] = float(obj['lon'].replace("+", "")) if obj['lon'] else None
         # elev
-        obj['elev'] = obj['elev'] and obj['elev'] != '-99999' and int(obj['elev']) * 10 or None
+        obj['elev(m)'] = float(obj['elev(m)'].replace("+", "")) if \
+            obj['elev(m)'] else None
         # begin and end datetimes
         obj['begin'] = str_to_datetime(obj['begin'])
         obj['end'] = str_to_datetime(obj['end'])
